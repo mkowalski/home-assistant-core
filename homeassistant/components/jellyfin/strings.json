@@ -45,6 +45,9 @@
       }
     },
     "sensor": {
+      "next_recording": {
+        "name": "Next recording"
+      },
       "watching": {
         "name": "Active clients",
         "unit_of_measurement": "clients"

@@ -1,14 +1,29 @@
 """Tests for the Jellyfin sensor platform."""
 
-from unittest.mock import MagicMock
+from datetime import timedelta
+from unittest.mock import MagicMock, patch
+
+from freezegun.api import FrozenDateTimeFactory
+from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.components.jellyfin.const import DOMAIN
 from homeassistant.components.sensor import ATTR_STATE_CLASS
-from homeassistant.const import ATTR_DEVICE_CLASS, ATTR_FRIENDLY_NAME, ATTR_ICON
+from homeassistant.const import (
+    ATTR_DEVICE_CLASS,
+    ATTR_FRIENDLY_NAME,
+    ATTR_ICON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    Platform,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from tests.common import MockConfigEntry
+from . import load_json_fixture
+
+from tests.common import MockConfigEntry, async_fire_time_changed, snapshot_platform
+
+NEXT_RECORDING_ENTITY_ID = "sensor.jellyfin_server_next_recording"
 
 
 async def test_watching(
@@ -43,3 +58,93 @@ async def test_watching(
     assert device.manufacturer == "Jellyfin"
     assert device.name == "JELLYFIN-SERVER"
     assert device.sw_version is None
+
+
+async def test_entities(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_config_entry: MockConfigEntry,
+    mock_jellyfin: MagicMock,
+    entity_registry: er.EntityRegistry,
+    snapshot: SnapshotAssertion,
+) -> None:
+    """Test the sensor entities."""
+    freezer.move_to("2026-10-02T20:00:00+00:00")
+
+    mock_config_entry.add_to_hass(hass)
+    with patch("homeassistant.components.jellyfin.PLATFORMS", [Platform.SENSOR]):
+        await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    await snapshot_platform(hass, entity_registry, snapshot, mock_config_entry.entry_id)
+
+
+async def test_next_recording(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_config_entry: MockConfigEntry,
+    mock_jellyfin: MagicMock,
+    mock_api: MagicMock,
+) -> None:
+    """Test the next recording sensor following the scheduled timers."""
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    # The in-progress timer is skipped; the next scheduled one starts at
+    # 21:00 with 120 seconds of pre-padding
+    state = hass.states.get(NEXT_RECORDING_ENTITY_ID)
+    assert state
+    assert state.state == "2026-10-02T20:58:00+00:00"
+
+    mock_api.get_live_tv_timers.return_value = load_json_fixture(
+        "live-tv-timers-empty.json"
+    )
+    freezer.tick(timedelta(seconds=60))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    state = hass.states.get(NEXT_RECORDING_ENTITY_ID)
+    assert state
+    assert state.state == STATE_UNKNOWN
+
+
+async def test_next_recording_unavailable_when_update_fails(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_config_entry: MockConfigEntry,
+    mock_jellyfin: MagicMock,
+    mock_api: MagicMock,
+) -> None:
+    """Test the next recording sensor becoming unavailable when the server errors."""
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    mock_api.get_live_tv_timers.return_value = None
+    freezer.tick(timedelta(seconds=60))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    state = hass.states.get(NEXT_RECORDING_ENTITY_ID)
+    assert state
+    assert state.state == STATE_UNAVAILABLE
+
+
+async def test_no_next_recording_without_live_tv(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_jellyfin: MagicMock,
+    mock_api: MagicMock,
+) -> None:
+    """Test only the session sensor exists when Live TV is not available."""
+    mock_api.get_live_tv_info.return_value = load_json_fixture(
+        "live-tv-info-other-user.json"
+    )
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.jellyfin_server_active_clients")
+    assert hass.states.get(NEXT_RECORDING_ENTITY_ID) is None
