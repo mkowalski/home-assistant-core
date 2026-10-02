@@ -112,6 +112,7 @@ SEARCH_ITEM_TYPE_MAP: dict[MediaClass, list[str]] = {
 } | {MediaClass.TRACK: [ITEM_TYPE_AUDIO]}
 
 PLATFORMS = [
+    Platform.BINARY_SENSOR,
     Platform.CALENDAR,
     Platform.MEDIA_PLAYER,
     Platform.REMOTE,

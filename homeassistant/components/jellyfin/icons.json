@@ -1,5 +1,13 @@
 {
   "entity": {
+    "binary_sensor": {
+      "recording": {
+        "default": "mdi:record-circle-outline",
+        "state": {
+          "on": "mdi:record-rec"
+        }
+      }
+    },
     "calendar": {
       "recordings": {
         "default": "mdi:record-rec"
