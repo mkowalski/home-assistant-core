@@ -1,6 +1,11 @@
 """Tests for the Jellyfin integration."""
 
+from http import HTTPStatus
+from typing import Any
 from unittest.mock import MagicMock
+
+from jellyfin_apiclient_python.exceptions import HTTPException
+import pytest
 
 from homeassistant.components.jellyfin.const import DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
@@ -9,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.setup import async_setup_component
 
-from . import async_load_json_fixture
+from . import async_load_json_fixture, load_json_fixture
 from .const import TEST_PASSWORD, TEST_URL, TEST_USERNAME
 
 from tests.common import MockConfigEntry
@@ -75,6 +80,59 @@ async def test_load_unload_config_entry(
     await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     assert mock_config_entry.state is ConfigEntryState.NOT_LOADED
+
+
+@pytest.mark.parametrize(
+    "mock_kwargs",
+    [
+        pytest.param(
+            {"return_value": load_json_fixture("live-tv-info-other-user.json")},
+            id="not_enabled_for_user",
+        ),
+        pytest.param(
+            {"side_effect": HTTPException(HTTPStatus.FORBIDDEN, "error")},
+            id="no_permission",
+        ),
+        pytest.param({"return_value": None}, id="server_error"),
+    ],
+)
+async def test_live_tv_not_available(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_jellyfin: MagicMock,
+    mock_api: MagicMock,
+    mock_kwargs: dict[str, Any],
+) -> None:
+    """Test loading without recording entities when Live TV is not available."""
+    mock_api.get_live_tv_info.configure_mock(**mock_kwargs)
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("calendar.jellyfin_server_recordings") is None
+    mock_api.get_live_tv_timers.assert_not_called()
+
+
+@pytest.mark.parametrize("failing_method", ["get_live_tv_info", "get_live_tv_timers"])
+async def test_live_tv_connection_error(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_jellyfin: MagicMock,
+    mock_api: MagicMock,
+    failing_method: str,
+) -> None:
+    """Test a Live TV request failing during setup."""
+    getattr(mock_api, failing_method).side_effect = HTTPException(
+        "ServerUnreachable", "error"
+    )
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
 
 
 async def test_migrate_strips_trailing_slash_from_url(

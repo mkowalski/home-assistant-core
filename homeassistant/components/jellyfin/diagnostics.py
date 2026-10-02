@@ -1,5 +1,6 @@
 """Diagnostics support for Jellyfin."""
 
+from dataclasses import asdict
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -16,6 +17,12 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
     coordinator = entry.runtime_data.sessions
+
+    live_tv: dict[str, Any] | None = None
+    if (live_tv_coordinator := entry.runtime_data.live_tv) is not None:
+        live_tv = {
+            "recordings": [asdict(recording) for recording in live_tv_coordinator.data]
+        }
 
     return {
         "entry": {
@@ -41,4 +48,5 @@ async def async_get_config_entry_diagnostics(
             }
             for session_id, session_data in coordinator.data.items()
         ],
+        "live_tv": live_tv,
     }

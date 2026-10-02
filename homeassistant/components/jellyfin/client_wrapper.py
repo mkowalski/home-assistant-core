@@ -1,5 +1,6 @@
 """Utility methods for initializing a Jellyfin client."""
 
+from http import HTTPStatus
 import socket
 from typing import Any
 
@@ -9,12 +10,19 @@ from jellyfin_apiclient_python.connection_manager import (
     CONNECTION_STATE,
     ConnectionManager,
 )
+from jellyfin_apiclient_python.exceptions import HTTPException
 
 from homeassistant import exceptions
 from homeassistant.const import CONF_PASSWORD, CONF_URL, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import CLIENT_VERSION, ITEM_KEY_IMAGE_TAGS, USER_AGENT, USER_APP_NAME
+from .const import (
+    CLIENT_VERSION,
+    ITEM_KEY_IMAGE_TAGS,
+    LOGGER,
+    USER_AGENT,
+    USER_APP_NAME,
+)
 
 
 async def validate_input(
@@ -88,6 +96,39 @@ def _get_user_id(api: API) -> str:
     settings: dict[str, Any] = api.get_user_settings()
     userid: str = settings["Id"]
     return userid
+
+
+def is_live_tv_enabled(client: JellyfinClient) -> bool:
+    """Check whether Live TV is available to the signed-in user.
+
+    Only users who hold the Live TV permission on a server with a tuner
+    or guide provider configured are listed in EnabledUsers.
+    """
+    try:
+        info: dict[str, Any] | None = client.jellyfin.get_live_tv_info()
+    except HTTPException as ex:
+        # The endpoint itself requires the Live TV permission
+        if ex.status == HTTPStatus.FORBIDDEN:
+            return False
+        raise CannotConnect from ex
+
+    # The client library swallows HTTP 500 responses and returns None
+    if info is None:
+        LOGGER.warning(
+            "Could not determine Live TV availability, "
+            "Live TV recordings will not be available"
+        )
+        return False
+
+    user_id: str = client.config.data["auth.user_id"]
+    return _normalize_guid(user_id) in {
+        _normalize_guid(enabled_user) for enabled_user in info.get("EnabledUsers", [])
+    }
+
+
+def _normalize_guid(value: str) -> str:
+    """Normalize a GUID, which Jellyfin returns with or without dashes."""
+    return value.replace("-", "").lower()
 
 
 def get_artwork_url(

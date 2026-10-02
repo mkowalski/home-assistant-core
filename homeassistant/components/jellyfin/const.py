@@ -55,6 +55,18 @@ SUPPORTED_AUDIO_CODECS: Final = ["aac", "mp3", "vorbis", "wma"]
 
 PLAYABLE_ITEM_TYPES: Final = [ITEM_TYPE_AUDIO, ITEM_TYPE_EPISODE, ITEM_TYPE_MOVIE]
 
+# Jellyfin RecordingStatus values of timers that will record or are recording
+RECORDING_STATUS_NEW: Final = "New"
+RECORDING_STATUS_IN_PROGRESS: Final = "InProgress"
+RECORDING_STATUS_CONFLICTED_OK: Final = "ConflictedOk"
+RECORDING_STATUS_CONFLICTED_NOT_OK: Final = "ConflictedNotOk"
+ACTIVE_RECORDING_STATUSES: Final = {
+    RECORDING_STATUS_NEW,
+    RECORDING_STATUS_IN_PROGRESS,
+    RECORDING_STATUS_CONFLICTED_OK,
+    RECORDING_STATUS_CONFLICTED_NOT_OK,
+}
+
 
 USER_APP_NAME: Final = "Home Assistant"
 USER_AGENT: Final = f"Home-Assistant/{CLIENT_VERSION}"
@@ -99,5 +111,10 @@ SEARCH_ITEM_TYPE_MAP: dict[MediaClass, list[str]] = {
     for media_class in set(MEDIA_CLASS_MAP.values())
 } | {MediaClass.TRACK: [ITEM_TYPE_AUDIO]}
 
-PLATFORMS = [Platform.MEDIA_PLAYER, Platform.REMOTE, Platform.SENSOR]
+PLATFORMS = [
+    Platform.CALENDAR,
+    Platform.MEDIA_PLAYER,
+    Platform.REMOTE,
+    Platform.SENSOR,
+]
 LOGGER = logging.getLogger(__package__)

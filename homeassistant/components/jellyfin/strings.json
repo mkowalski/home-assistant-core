@@ -34,11 +34,24 @@
     }
   },
   "entity": {
+    "calendar": {
+      "recordings": {
+        "name": "Recordings"
+      }
+    },
     "sensor": {
       "watching": {
         "name": "Active clients",
         "unit_of_measurement": "clients"
       }
+    }
+  },
+  "exceptions": {
+    "live_tv_unauthorized": {
+      "message": "Authentication with the Jellyfin server failed while fetching Live TV recordings"
+    },
+    "live_tv_update_failed": {
+      "message": "Could not fetch Live TV recordings from the Jellyfin server"
     }
   },
   "options": {

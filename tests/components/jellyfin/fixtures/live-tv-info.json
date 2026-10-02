@@ -1,0 +1,16 @@
+{
+  "Services": [
+    {
+      "Name": "Emby",
+      "HomePageUrl": null,
+      "Status": "Ok",
+      "StatusMessage": null,
+      "Version": null,
+      "HasUpdateAvailable": false,
+      "IsVisible": true,
+      "Tuners": []
+    }
+  ],
+  "IsEnabled": true,
+  "EnabledUsers": ["38a5a5bbdc3049a2b1751de0d1488c43"]
+}

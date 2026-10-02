@@ -54,6 +54,7 @@ async def async_setup_entry(
 class JellyfinServerSensor(JellyfinServerEntity, SensorEntity):
     """Defines a Jellyfin sensor entity."""
 
+    coordinator: JellyfinDataUpdateCoordinator
     entity_description: JellyfinSensorEntityDescription
 
     def __init__(

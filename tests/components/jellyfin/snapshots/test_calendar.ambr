@@ -1,0 +1,105 @@
+# serializer version: 1
+# name: test_entities[calendar.jellyfin_server_recordings-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'calendar',
+    'entity_category': None,
+    'entity_id': 'calendar.jellyfin_server_recordings',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Recordings',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Recordings',
+    'platform': 'jellyfin',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'recordings',
+    'unique_id': 'SERVER-UUID-recordings',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_entities[calendar.jellyfin_server_recordings-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <CalendarEntityStateAttribute.ALL_DAY: 'all_day'>: False,
+      <CalendarEntityStateAttribute.DESCRIPTION: 'description'>: '''
+        Channel One HD
+        
+        The day's headlines.
+      ''',
+      <CalendarEntityStateAttribute.END_TIME: 'end_time'>: '2026-10-02 20:30:00',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'JELLYFIN-SERVER Recordings',
+      <CalendarEntityStateAttribute.LOCATION: 'location'>: '',
+      <CalendarEntityStateAttribute.MESSAGE: 'message'>: 'Evening News - Friday edition',
+      <CalendarEntityStateAttribute.START_TIME: 'start_time'>: '2026-10-02 19:50:00',
+    }),
+    'context': <ANY>,
+    'entity_id': 'calendar.jellyfin_server_recordings',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'on',
+  })
+# ---
+# name: test_get_events
+  dict({
+    'calendar.jellyfin_server_recordings': dict({
+      'events': list([
+        dict({
+          'description': '''
+            Channel One HD
+            
+            The day's headlines.
+          ''',
+          'end': '2026-10-02T20:30:00+00:00',
+          'start': '2026-10-02T19:50:00+00:00',
+          'status': 'confirmed',
+          'summary': 'Evening News - Friday edition',
+        }),
+        dict({
+          'description': '''
+            Movie Channel
+            
+            An action movie.
+          ''',
+          'end': '2026-10-02T22:05:00+00:00',
+          'start': '2026-10-02T20:58:00+00:00',
+          'status': 'confirmed',
+          'summary': 'Blockbuster Night',
+        }),
+        dict({
+          'description': 'Sports Channel',
+          'end': '2026-10-02T23:30:00+00:00',
+          'start': '2026-10-02T21:30:00+00:00',
+          'status': 'tentative',
+          'summary': 'Late Game',
+        }),
+        dict({
+          'description': 'Channel One HD',
+          'end': '2026-10-09T21:46:00+00:00',
+          'start': '2026-10-09T20:14:00+00:00',
+          'status': 'confirmed',
+          'summary': 'Weekly Documentary',
+        }),
+      ]),
+    }),
+  })
+# ---

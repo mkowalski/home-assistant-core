@@ -80,6 +80,8 @@ def mock_api() -> MagicMock:
     jf_api.get_media_folders.return_value = load_json_fixture("get-media-folders.json")
     jf_api.user_items.side_effect = api_user_items_side_effect
     jf_api.search_media_items.return_value = load_json_fixture("user-items.json")
+    jf_api.get_live_tv_info.return_value = load_json_fixture("live-tv-info.json")
+    jf_api.get_live_tv_timers.return_value = load_json_fixture("live-tv-timers.json")
 
     return jf_api
 
@@ -88,7 +90,11 @@ def mock_api() -> MagicMock:
 def mock_config() -> MagicMock:
     """Return a mocked JellyfinClient."""
     jf_config = create_autospec(Config)
-    jf_config.data = {"auth.server": "http://localhost"}
+    # The library stores the signed-in user's id at login
+    jf_config.data = {
+        "auth.server": "http://localhost",
+        "auth.user_id": "38a5a5bb-dc30-49a2-b175-1de0d1488c43",
+    }
 
     return jf_config
 
