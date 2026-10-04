@@ -8,20 +8,9 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.typing import ConfigType
 
-from .client_wrapper import (
-    CannotConnect,
-    InvalidAuth,
-    create_client,
-    is_live_tv_enabled,
-    validate_input,
-)
+from .client_wrapper import CannotConnect, InvalidAuth, create_client, validate_input
 from .const import CONF_CLIENT_DEVICE_ID, DEFAULT_NAME, DOMAIN, PLATFORMS
-from .coordinator import (
-    JellyfinConfigEntry,
-    JellyfinDataUpdateCoordinator,
-    JellyfinLiveTvCoordinator,
-    JellyfinRuntimeData,
-)
+from .coordinator import JellyfinConfigEntry, JellyfinDataUpdateCoordinator
 from .services import async_setup_services
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -59,17 +48,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: JellyfinConfigEntry) -> 
     )
     await coordinator.async_config_entry_first_refresh()
 
-    live_tv_coordinator: JellyfinLiveTvCoordinator | None = None
-    try:
-        live_tv_enabled = await hass.async_add_executor_job(is_live_tv_enabled, client)
-    except CannotConnect as ex:
-        raise ConfigEntryNotReady("Cannot read Live TV info from Jellyfin") from ex
-    if live_tv_enabled:
-        live_tv_coordinator = JellyfinLiveTvCoordinator(
-            hass, entry, client, server_info
-        )
-        await live_tv_coordinator.async_config_entry_first_refresh()
-
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -80,9 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JellyfinConfigEntry) -> 
         sw_version=coordinator.server_version,
     )
 
-    entry.runtime_data = JellyfinRuntimeData(
-        sessions=coordinator, live_tv=live_tv_coordinator
-    )
+    entry.runtime_data = coordinator
     entry.async_on_unload(client.stop)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -110,7 +86,7 @@ async def async_remove_config_entry_device(
     device_entry: dr.AnyDeviceEntry,
 ) -> bool:
     """Remove device from a config entry."""
-    coordinator = config_entry.runtime_data.sessions
+    coordinator = config_entry.runtime_data
 
     return not device_entry.identifiers.intersection(
         (

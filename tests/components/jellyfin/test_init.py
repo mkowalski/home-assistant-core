@@ -1,15 +1,24 @@
 """Tests for the Jellyfin integration."""
 
+from datetime import timedelta
 from http import HTTPStatus
 from typing import Any
 from unittest.mock import MagicMock
 
+from freezegun.api import FrozenDateTimeFactory
 from jellyfin_apiclient_python.exceptions import HTTPException
 import pytest
 
 from homeassistant.components.jellyfin.const import DOMAIN
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
-from homeassistant.const import CONF_PASSWORD, CONF_URL, CONF_USERNAME
+from homeassistant.const import (
+    CONF_PASSWORD,
+    CONF_URL,
+    CONF_USERNAME,
+    STATE_OFF,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.setup import async_setup_component
@@ -17,7 +26,7 @@ from homeassistant.setup import async_setup_component
 from . import async_load_json_fixture, load_json_fixture
 from .const import TEST_PASSWORD, TEST_URL, TEST_USERNAME
 
-from tests.common import MockConfigEntry
+from tests.common import MockConfigEntry, async_fire_time_changed
 from tests.typing import WebSocketGenerator
 
 
@@ -93,7 +102,6 @@ async def test_load_unload_config_entry(
             {"side_effect": HTTPException(HTTPStatus.FORBIDDEN, "error")},
             id="no_permission",
         ),
-        pytest.param({"return_value": None}, id="server_error"),
     ],
 )
 async def test_live_tv_not_available(
@@ -115,6 +123,36 @@ async def test_live_tv_not_available(
     mock_api.get_live_tv_timers.assert_not_called()
 
 
+@pytest.mark.usefixtures("mock_jellyfin")
+async def test_live_tv_info_server_error_recovers(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_config_entry: MockConfigEntry,
+    mock_api: MagicMock,
+) -> None:
+    """Test automatic setup retry after the Live TV info request fails."""
+    freezer.move_to("2026-10-02T20:00:00+00:00")
+    await hass.async_start()
+    mock_api.get_live_tv_info.return_value = None
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+    mock_api.get_live_tv_timers.assert_not_called()
+
+    mock_api.get_live_tv_info.return_value = load_json_fixture("live-tv-info.json")
+    freezer.tick(timedelta(seconds=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert mock_config_entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("calendar.jellyfin_server_recordings") is not None
+    assert hass.states.get("binary_sensor.jellyfin_server_recording") is not None
+    assert hass.states.get("sensor.jellyfin_server_next_recording") is not None
+
+
 @pytest.mark.parametrize("failing_method", ["get_live_tv_info", "get_live_tv_timers"])
 async def test_live_tv_connection_error(
     hass: HomeAssistant,
@@ -133,6 +171,95 @@ async def test_live_tv_connection_error(
     await hass.async_block_till_done()
 
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
+
+
+@pytest.mark.usefixtures("mock_jellyfin")
+async def test_sessions_and_recordings_update_together(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_config_entry: MockConfigEntry,
+    mock_api: MagicMock,
+) -> None:
+    """Test sessions and recordings both refresh after ten seconds."""
+    freezer.move_to("2026-10-02T20:00:00+00:00")
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    mock_api.sessions.return_value = []
+    mock_api.get_live_tv_timers.return_value = load_json_fixture(
+        "live-tv-timers-empty.json"
+    )
+    freezer.tick(timedelta(seconds=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.jellyfin_server_active_clients").state == "0"
+    assert hass.states.get("binary_sensor.jellyfin_server_recording").state == STATE_OFF
+    assert hass.states.get("calendar.jellyfin_server_recordings").state == STATE_OFF
+    assert (
+        hass.states.get("sensor.jellyfin_server_next_recording").state == STATE_UNKNOWN
+    )
+    mock_api.get_live_tv_info.assert_called_once()
+
+
+@pytest.mark.parametrize("failing_method", ["sessions", "get_live_tv_timers"])
+@pytest.mark.parametrize(
+    "mock_kwargs",
+    [
+        pytest.param({"return_value": None}, id="server_error"),
+        pytest.param(
+            {"side_effect": HTTPException("ServerUnreachable", "error")},
+            id="connection_error",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("mock_jellyfin")
+async def test_shared_update_failure_and_recovery(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    mock_config_entry: MockConfigEntry,
+    mock_api: MagicMock,
+    failing_method: str,
+    mock_kwargs: dict[str, Any],
+) -> None:
+    """Test either request failing makes all entities unavailable until recovery."""
+    freezer.move_to("2026-10-02T20:00:00+00:00")
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    entity_ids = (
+        "media_player.jellyfin_device",
+        "remote.jellyfin_device",
+        "sensor.jellyfin_server_active_clients",
+        "calendar.jellyfin_server_recordings",
+        "binary_sensor.jellyfin_server_recording",
+        "sensor.jellyfin_server_next_recording",
+    )
+    initial_states = {
+        entity_id: hass.states.get(entity_id).state for entity_id in entity_ids
+    }
+    failing_request = getattr(mock_api, failing_method)
+    original_response = failing_request.return_value
+    failing_request.configure_mock(**mock_kwargs)
+
+    freezer.tick(timedelta(seconds=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert {
+        entity_id: hass.states.get(entity_id).state for entity_id in entity_ids
+    } == dict.fromkeys(entity_ids, STATE_UNAVAILABLE)
+
+    failing_request.configure_mock(side_effect=None, return_value=original_response)
+    freezer.tick(timedelta(seconds=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert {
+        entity_id: hass.states.get(entity_id).state for entity_id in entity_ids
+    } == initial_states
 
 
 async def test_migrate_strips_trailing_slash_from_url(

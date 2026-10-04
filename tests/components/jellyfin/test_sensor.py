@@ -4,6 +4,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
+import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.components.jellyfin.const import DOMAIN
@@ -65,11 +66,13 @@ async def test_entities(
     freezer: FrozenDateTimeFactory,
     mock_config_entry: MockConfigEntry,
     mock_jellyfin: MagicMock,
+    mock_api: MagicMock,
     entity_registry: er.EntityRegistry,
     snapshot: SnapshotAssertion,
 ) -> None:
     """Test the sensor entities."""
     freezer.move_to("2026-10-02T20:00:00+00:00")
+    mock_api.get_live_tv_timers.return_value["Items"].reverse()
 
     mock_config_entry.add_to_hass(hass)
     with patch("homeassistant.components.jellyfin.PLATFORMS", [Platform.SENSOR]):
@@ -79,14 +82,17 @@ async def test_entities(
     await snapshot_platform(hass, entity_registry, snapshot, mock_config_entry.entry_id)
 
 
+@pytest.mark.parametrize("status", ["InProgress", "ConflictedOk", "ConflictedNotOk"])
 async def test_next_recording(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     mock_config_entry: MockConfigEntry,
     mock_jellyfin: MagicMock,
     mock_api: MagicMock,
+    status: str,
 ) -> None:
     """Test the next recording sensor following the scheduled timers."""
+    freezer.move_to("2026-10-02T20:00:00+00:00")
     mock_config_entry.add_to_hass(hass)
     await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
@@ -97,10 +103,19 @@ async def test_next_recording(
     assert state
     assert state.state == "2026-10-02T20:58:00+00:00"
 
+    mock_api.get_live_tv_timers.return_value["Items"][1]["Status"] = status
+    freezer.tick(timedelta(seconds=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    state = hass.states.get(NEXT_RECORDING_ENTITY_ID)
+    assert state
+    assert state.state == "2026-10-09T20:14:00+00:00"
+
     mock_api.get_live_tv_timers.return_value = load_json_fixture(
         "live-tv-timers-empty.json"
     )
-    freezer.tick(timedelta(seconds=60))
+    freezer.tick(timedelta(seconds=10))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
 
@@ -122,7 +137,7 @@ async def test_next_recording_unavailable_when_update_fails(
     await hass.async_block_till_done()
 
     mock_api.get_live_tv_timers.return_value = None
-    freezer.tick(timedelta(seconds=60))
+    freezer.tick(timedelta(seconds=10))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
 

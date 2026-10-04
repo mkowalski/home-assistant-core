@@ -13,6 +13,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .client_wrapper import CannotConnect, is_live_tv_enabled
 from .const import (
     ACTIVE_RECORDING_STATUSES,
     CONF_CLIENT_DEVICE_ID,
@@ -21,16 +22,7 @@ from .const import (
     USER_APP_NAME,
 )
 
-
-@dataclass
-class JellyfinRuntimeData:
-    """Runtime data for the Jellyfin integration."""
-
-    sessions: JellyfinDataUpdateCoordinator
-    live_tv: JellyfinLiveTvCoordinator | None = None
-
-
-type JellyfinConfigEntry = ConfigEntry[JellyfinRuntimeData]
+type JellyfinConfigEntry = ConfigEntry[JellyfinDataUpdateCoordinator]
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -48,39 +40,10 @@ class JellyfinRecording:
     end: datetime
 
 
-class JellyfinCoordinator[_DataT](DataUpdateCoordinator[_DataT]):
-    """Base data update coordinator for the Jellyfin integration."""
+class JellyfinDataUpdateCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
+    """Data update coordinator for Jellyfin sessions and recordings."""
 
     config_entry: JellyfinConfigEntry
-    _name: str
-    _update_interval: timedelta
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        config_entry: JellyfinConfigEntry,
-        api_client: JellyfinClient,
-        system_info: dict[str, Any],
-    ) -> None:
-        """Initialize the coordinator."""
-        super().__init__(
-            hass=hass,
-            logger=LOGGER,
-            config_entry=config_entry,
-            name=f"{DOMAIN}_{self._name}",
-            update_interval=self._update_interval,
-        )
-        self.api_client = api_client
-        self.server_id: str = system_info["Id"]
-        self.server_name: str = system_info["Name"]
-        self.server_version: str | None = system_info.get("Version")
-
-
-class JellyfinDataUpdateCoordinator(JellyfinCoordinator[dict[str, dict[str, Any]]]):
-    """Data update coordinator for Jellyfin sessions."""
-
-    _name = "sessions"
-    _update_interval = timedelta(seconds=10)
 
     def __init__(
         self,
@@ -91,23 +54,62 @@ class JellyfinDataUpdateCoordinator(JellyfinCoordinator[dict[str, dict[str, Any]
         user_id: str,
     ) -> None:
         """Initialize the coordinator."""
-        super().__init__(hass, config_entry, api_client, system_info)
+        super().__init__(
+            hass=hass,
+            logger=LOGGER,
+            config_entry=config_entry,
+            name=DOMAIN,
+            update_interval=timedelta(seconds=10),
+        )
+        self.api_client = api_client
+        self.server_id: str = system_info["Id"]
+        self.server_name: str = system_info["Name"]
+        self.server_version: str | None = system_info.get("Version")
         self.client_device_id: str = config_entry.data[CONF_CLIENT_DEVICE_ID]
         self.user_id: str = user_id
 
         self.session_ids: set[str] = set()
         self.remote_session_ids: set[str] = set()
         self.device_ids: set[str] = set()
+        self.live_tv_enabled = False
+        self.recordings: list[JellyfinRecording] = []
+
+    @override
+    async def _async_setup(self) -> None:
+        """Determine whether the signed-in user can access Live TV."""
+        try:
+            self.live_tv_enabled = await self.hass.async_add_executor_job(
+                is_live_tv_enabled, self.api_client
+            )
+        except CannotConnect as ex:
+            raise UpdateFailed("Cannot read Live TV info from Jellyfin") from ex
 
     @override
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Get the latest data from Jellyfin."""
-        sessions = await self.hass.async_add_executor_job(
-            self.api_client.jellyfin.sessions
-        )
+        """Get the latest sessions and recording timers from Jellyfin."""
+        timers: dict[str, Any] | None = None
+        try:
+            sessions = await self.hass.async_add_executor_job(
+                self.api_client.jellyfin.sessions
+            )
+            if self.live_tv_enabled:
+                timers = await self.hass.async_add_executor_job(
+                    self.api_client.jellyfin.get_live_tv_timers
+                )
+        except HTTPException as ex:
+            if ex.status == "Unauthorized":
+                raise ConfigEntryAuthFailed(
+                    translation_domain=DOMAIN, translation_key="unauthorized"
+                ) from ex
+            raise UpdateFailed(
+                translation_domain=DOMAIN, translation_key="update_failed"
+            ) from ex
 
-        if sessions is None:
-            return {}
+        # The client library swallows HTTP 500 responses and returns None
+        if sessions is None or (self.live_tv_enabled and timers is None):
+            raise UpdateFailed(
+                translation_domain=DOMAIN, translation_key="update_failed"
+            )
 
         sessions_by_id: dict[str, dict[str, Any]] = {
             session["Id"]: session
@@ -116,46 +118,18 @@ class JellyfinDataUpdateCoordinator(JellyfinCoordinator[dict[str, dict[str, Any]
             and session["Client"] != USER_APP_NAME
         }
 
+        recordings = []
+        if timers is not None:
+            recordings = [
+                recording
+                for timer in timers["Items"]
+                if (recording := _parse_recording(timer)) is not None
+            ]
+        recordings.sort(key=lambda recording: recording.start)
+        self.recordings = recordings
         self.device_ids = {session["DeviceId"] for session in sessions_by_id.values()}
 
         return sessions_by_id
-
-
-class JellyfinLiveTvCoordinator(JellyfinCoordinator[list[JellyfinRecording]]):
-    """Data update coordinator for Jellyfin Live TV recording timers."""
-
-    _name = "live_tv"
-    _update_interval = timedelta(seconds=60)
-
-    @override
-    async def _async_update_data(self) -> list[JellyfinRecording]:
-        """Get the scheduled and in-progress recordings from Jellyfin."""
-        try:
-            result = await self.hass.async_add_executor_job(
-                self.api_client.jellyfin.get_live_tv_timers
-            )
-        except HTTPException as ex:
-            if ex.status == "Unauthorized":
-                raise ConfigEntryAuthFailed(
-                    translation_domain=DOMAIN, translation_key="live_tv_unauthorized"
-                ) from ex
-            raise UpdateFailed(
-                translation_domain=DOMAIN, translation_key="live_tv_update_failed"
-            ) from ex
-
-        # The client library swallows HTTP 500 responses and returns None
-        if result is None:
-            raise UpdateFailed(
-                translation_domain=DOMAIN, translation_key="live_tv_update_failed"
-            )
-
-        recordings = [
-            recording
-            for timer in result["Items"]
-            if (recording := _parse_recording(timer)) is not None
-        ]
-        recordings.sort(key=lambda recording: recording.start)
-        return recordings
 
 
 def _parse_recording(timer: dict[str, Any]) -> JellyfinRecording | None:

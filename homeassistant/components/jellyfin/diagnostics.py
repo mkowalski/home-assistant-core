@@ -16,12 +16,12 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: JellyfinConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator = entry.runtime_data.sessions
+    coordinator = entry.runtime_data
 
     live_tv: dict[str, Any] | None = None
-    if (live_tv_coordinator := entry.runtime_data.live_tv) is not None:
+    if coordinator.live_tv_enabled:
         live_tv = {
-            "recordings": [asdict(recording) for recording in live_tv_coordinator.data]
+            "recordings": [asdict(recording) for recording in coordinator.recordings]
         }
 
     return {

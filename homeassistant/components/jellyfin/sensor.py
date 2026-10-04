@@ -15,17 +15,21 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 
 from .const import RECORDING_STATUS_NEW
-from .coordinator import JellyfinConfigEntry, JellyfinCoordinator, JellyfinRecording
+from .coordinator import (
+    JellyfinConfigEntry,
+    JellyfinDataUpdateCoordinator,
+    JellyfinRecording,
+)
 from .entity import JellyfinServerEntity
 
 PARALLEL_UPDATES = 0
 
 
 @dataclass(frozen=True, kw_only=True)
-class JellyfinSensorEntityDescription[_DataT](SensorEntityDescription):
+class JellyfinSensorEntityDescription(SensorEntityDescription):
     """Describes Jellyfin sensor entity."""
 
-    value_fn: Callable[[_DataT], StateType | datetime]
+    value_fn: Callable[[JellyfinDataUpdateCoordinator], StateType | datetime]
 
 
 def _count_now_playing(data: dict[str, dict[str, Any]]) -> int:
@@ -49,24 +53,20 @@ def _next_recording_start(recordings: list[JellyfinRecording]) -> datetime | Non
     )
 
 
-SESSION_SENSOR_TYPES: tuple[
-    JellyfinSensorEntityDescription[dict[str, dict[str, Any]]], ...
-] = (
+SESSION_SENSOR_TYPES: tuple[JellyfinSensorEntityDescription, ...] = (
     JellyfinSensorEntityDescription(
         key="watching",
         translation_key="watching",
-        value_fn=_count_now_playing,
+        value_fn=lambda coordinator: _count_now_playing(coordinator.data),
     ),
 )
 
-LIVE_TV_SENSOR_TYPES: tuple[
-    JellyfinSensorEntityDescription[list[JellyfinRecording]], ...
-] = (
+LIVE_TV_SENSOR_TYPES: tuple[JellyfinSensorEntityDescription, ...] = (
     JellyfinSensorEntityDescription(
         key="next_recording",
         translation_key="next_recording",
         device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=_next_recording_start,
+        value_fn=lambda coordinator: _next_recording_start(coordinator.recordings),
     ),
 )
 
@@ -77,29 +77,29 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Jellyfin sensor based on a config entry."""
+    coordinator = entry.runtime_data
     entities: list[SensorEntity] = [
-        JellyfinServerSensor(entry.runtime_data.sessions, description)
+        JellyfinServerSensor(coordinator, description)
         for description in SESSION_SENSOR_TYPES
     ]
-    if (live_tv_coordinator := entry.runtime_data.live_tv) is not None:
+    if coordinator.live_tv_enabled:
         entities.extend(
-            JellyfinServerSensor(live_tv_coordinator, description)
+            JellyfinServerSensor(coordinator, description)
             for description in LIVE_TV_SENSOR_TYPES
         )
 
     async_add_entities(entities)
 
 
-class JellyfinServerSensor[_DataT](JellyfinServerEntity, SensorEntity):
+class JellyfinServerSensor(JellyfinServerEntity, SensorEntity):
     """Defines a Jellyfin sensor entity."""
 
-    coordinator: JellyfinCoordinator[_DataT]
-    entity_description: JellyfinSensorEntityDescription[_DataT]
+    entity_description: JellyfinSensorEntityDescription
 
     def __init__(
         self,
-        coordinator: JellyfinCoordinator[_DataT],
-        description: JellyfinSensorEntityDescription[_DataT],
+        coordinator: JellyfinDataUpdateCoordinator,
+        description: JellyfinSensorEntityDescription,
     ) -> None:
         """Initialize Jellyfin sensor."""
         super().__init__(coordinator)
@@ -110,4 +110,4 @@ class JellyfinServerSensor[_DataT](JellyfinServerEntity, SensorEntity):
     @override
     def native_value(self) -> StateType | datetime:
         """Return the state of the sensor."""
-        return self.entity_description.value_fn(self.coordinator.data)
+        return self.entity_description.value_fn(self.coordinator)

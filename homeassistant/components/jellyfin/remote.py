@@ -25,7 +25,7 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Jellyfin remote from a config entry."""
-    coordinator = entry.runtime_data.sessions
+    coordinator = entry.runtime_data
 
     @callback
     def handle_coordinator_update() -> None:

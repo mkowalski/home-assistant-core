@@ -4,6 +4,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
+import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, Platform
@@ -52,8 +53,32 @@ async def test_recording_follows_timer_status(
     mock_api.get_live_tv_timers.return_value = load_json_fixture(
         "live-tv-timers-empty.json"
     )
-    freezer.tick(timedelta(seconds=60))
+    freezer.tick(timedelta(seconds=10))
     async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    state = hass.states.get(ENTITY_ID)
+    assert state
+    assert state.state == STATE_OFF
+
+
+@pytest.mark.parametrize("status", ["New", "ConflictedOk", "ConflictedNotOk"])
+@pytest.mark.usefixtures("mock_jellyfin")
+async def test_scheduled_timer_is_not_recording(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_api: MagicMock,
+    status: str,
+) -> None:
+    """Test that a nonempty recording schedule does not mean the DVR is running."""
+    timers = mock_api.get_live_tv_timers.return_value
+    timer = timers["Items"][0]
+    timer["Status"] = status
+    timers["Items"] = [timer]
+    timers["TotalRecordCount"] = 1
+
+    mock_config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
 
     state = hass.states.get(ENTITY_ID)
@@ -74,7 +99,7 @@ async def test_unavailable_when_update_fails(
     await hass.async_block_till_done()
 
     mock_api.get_live_tv_timers.return_value = None
-    freezer.tick(timedelta(seconds=60))
+    freezer.tick(timedelta(seconds=10))
     async_fire_time_changed(hass)
     await hass.async_block_till_done()
 

@@ -16,13 +16,7 @@ from homeassistant import exceptions
 from homeassistant.const import CONF_PASSWORD, CONF_URL, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import (
-    CLIENT_VERSION,
-    ITEM_KEY_IMAGE_TAGS,
-    LOGGER,
-    USER_AGENT,
-    USER_APP_NAME,
-)
+from .const import CLIENT_VERSION, ITEM_KEY_IMAGE_TAGS, USER_AGENT, USER_APP_NAME
 
 
 async def validate_input(
@@ -114,11 +108,7 @@ def is_live_tv_enabled(client: JellyfinClient) -> bool:
 
     # The client library swallows HTTP 500 responses and returns None
     if info is None:
-        LOGGER.warning(
-            "Could not determine Live TV availability, "
-            "Live TV recordings will not be available"
-        )
-        return False
+        raise CannotConnect
 
     user_id: str = client.config.data["auth.user_id"]
     return _normalize_guid(user_id) in {

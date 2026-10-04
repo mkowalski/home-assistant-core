@@ -15,7 +15,7 @@ from homeassistant.util import dt as dt_util
 from .const import RECORDING_STATUS_CONFLICTED_NOT_OK
 from .coordinator import (
     JellyfinConfigEntry,
-    JellyfinLiveTvCoordinator,
+    JellyfinDataUpdateCoordinator,
     JellyfinRecording,
 )
 from .entity import JellyfinServerEntity
@@ -29,7 +29,8 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Jellyfin recordings calendar from a config entry."""
-    if (coordinator := entry.runtime_data.live_tv) is None:
+    coordinator = entry.runtime_data
+    if not coordinator.live_tv_enabled:
         return
 
     async_add_entities([JellyfinRecordingsCalendarEntity(coordinator)])
@@ -38,10 +39,9 @@ async def async_setup_entry(
 class JellyfinRecordingsCalendarEntity(JellyfinServerEntity, CalendarEntity):
     """Calendar of scheduled and in-progress Live TV recordings."""
 
-    coordinator: JellyfinLiveTvCoordinator
     _attr_translation_key = "recordings"
 
-    def __init__(self, coordinator: JellyfinLiveTvCoordinator) -> None:
+    def __init__(self, coordinator: JellyfinDataUpdateCoordinator) -> None:
         """Initialize the Jellyfin recordings calendar."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{coordinator.server_id}-recordings"
@@ -54,7 +54,7 @@ class JellyfinRecordingsCalendarEntity(JellyfinServerEntity, CalendarEntity):
         return next(
             (
                 _calendar_event(recording)
-                for recording in self.coordinator.data
+                for recording in self.coordinator.recordings
                 if recording.end > now
             ),
             None,
@@ -67,7 +67,7 @@ class JellyfinRecordingsCalendarEntity(JellyfinServerEntity, CalendarEntity):
         """Return the recordings that overlap the requested time range."""
         return [
             _calendar_event(recording)
-            for recording in self.coordinator.data
+            for recording in self.coordinator.recordings
             if recording.end > start_date and recording.start < end_date
         ]
 
